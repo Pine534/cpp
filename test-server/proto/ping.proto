@@ -1,0 +1,18 @@
+syntax = "proto3";
+package ping;
+message Ping {
+    int32 id = 1;
+    string name = 2;
+    repeated int32 num = 3;
+
+}
+
+message Pong {
+    int32 id = 1;
+    string name = 2;
+    int32 sum = 3;
+}
+
+service CalcService {
+    rpc Calc(Ping) returns(Pong);
+}
