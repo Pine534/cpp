@@ -6,13 +6,19 @@
 #include <stdio.h>
 #include <arpa/inet.h>
 
+#include "ping.pb.h"
+#include <ostream>
+#include <iostream>
+using namespace std;
+using namespace google::protobuf::io;
+
 int
 run(void)
 {
     const char* hello = "Hello,123123123123123213";
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in sin;
-    char buffer[1024];
+    
 
     sin.sin_family = AF_INET;
     // sin.sin_addr.s_addr = 0;
@@ -23,24 +29,44 @@ run(void)
         return -1;
     }
 
-    printf("connected\n");
-    int ret = send(sock, hello, strlen(hello), 0);
-    printf("sended %s %d\n", hello, ret);
+
+    ping::Ping ping;
+    ping.set_id(1);
+    ping.set_name("first");
+    ping.add_num(1);
+    ping.add_num(2);
+    ping.add_num(3);
+    // 这里+1是留一个数字来表示后面payload的长度， 为什么是1有待研究
+    int size = ping.ByteSizeLong() + 1;
+    char *buffer[size];
+    ArrayOutputStream aos(buffer, size);
+    CodedOutputStream *co = new CodedOutputStream(&aos);
+    co->WriteVarint32(ping.ByteSizeLong());
+    ping.SerializeToCodedStream(co);
+
     
-    char sendline[16];
-    while(1) {
-        fgets(sendline,1024,stdin);
-        int ret = send(sock, sendline, strlen(sendline), 0);
-        printf("sended %d\n", ret);
-        read(sock, buffer, 1024);
-        printf("%s\n", buffer);
-        memset(buffer, 0, sizeof(buffer));
-        memset(sendline, 0, sizeof(sendline));
-    }
+    printf("connected\n");
+    int ret = send(sock, buffer, size, 0);
+    printf("sended %x %d\n", *buffer, size);
+
+    google::protobuf::uint32 rsize;
+    // MSG_WAITALL才会阻塞
+    //这里写死了接收长度， 正确的做法应该是先读出第一个字节得到payload长度，然后等接收达到指定长度再解析，太复杂了先不写了
+    recv(sock, buffer, 12, MSG_WAITALL);
+    ArrayInputStream ais(buffer, rsize);
+    CodedInputStream coded_input(&ais);
+    coded_input.ReadVarint32(&rsize);
+    cout << "size is " << size << endl;
+    google::protobuf::io::CodedInputStream::Limit msgLimit = coded_input.PushLimit(rsize);
+    ping::Pong pong;
+    pong.ParseFromCodedStream(&coded_input);
+    coded_input.PopLimit(msgLimit);
+    cout << "msg is " << pong.DebugString() << endl;
     
     return 0;
 
 }
+
 
 int main()
 {
