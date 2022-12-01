@@ -18,9 +18,12 @@
 
 #include <fstream>
 #include <iostream>
+#include <google/protobuf/io/zero_copy_stream_impl_lite.h>
 using namespace std;
 
-#include "proto/ping.pb.h"
+using namespace google::protobuf::io;
+
+#include "ping.pb.h"
 
 #define MAX_LINE 16
 
@@ -31,33 +34,59 @@ void do_write(evutil_socket_t fd, short events, void *arg);
 void
 readcb(struct bufferevent *bev, void *ctx)
 {
-    printf("1\n");
+    // 读取不了的原因是因为这个值初始化为0， 但不知道什么因素会影响初始值
+    google::protobuf::uint32 size = 10000;
     struct evbuffer *input, *output;
-    char *line;
-    size_t n;
-    int i;
     input = bufferevent_get_input(bev);
     output = bufferevent_get_output(bev);
+    
+    // 这里+1大概是为了留一个\0
+    int buf_size = evbuffer_get_length(input) + 1;
+    char *buffer[buf_size];
+    cout << "buffer len is " << buf_size << endl;
 
-    while ((line = evbuffer_readln(input, &n, EVBUFFER_EOL_LF))) {
-        printf("%s\n", line);
-        evbuffer_add(output, line, n);
-        evbuffer_add(output, "\n", 1);
-        free(line);
-    }
+    evbuffer_remove(input, &buffer, buf_size);
+    // 16进制输出buffer的值
+    printf("%s\n", buffer);
+    
+    cout << "size is " << size << endl;
+    ArrayInputStream ais(buffer, size);
+    CodedInputStream coded_input(&ais);
+    cout << "size is " << size << endl;
+    coded_input.ReadVarint32(&size);
+    cout << "size is " << size << endl;
+    printf("%x \n", *buffer);
+    
+    CodedInputStream::Limit msgLimit = coded_input.PushLimit(size);
+    ping::Ping ping;
+    ping.ParseFromCodedStream(&coded_input);
+    coded_input.PopLimit(msgLimit);
+    cout << "msg is " << ping.DebugString() << endl;
 
-    if (evbuffer_get_length(input) >= MAX_LINE) {
-        /* Too long; just process what there is and go on so that the buffer
-         * doesn't grow infinitely long. */
-        char buf[1024];
-        while (evbuffer_get_length(input)) {
-            int n = evbuffer_remove(input, buf, sizeof(buf));
-            printf("%s\n", buf);
-            evbuffer_add(output, buf, n);
-        }
-        evbuffer_add(output, "\n", 1);
-        // bufferevent_write_buffer(bev, output);
+
+    ping::Pong pong;
+    pong.set_id(ping.id());
+    pong.set_name(ping.name());
+    int sum = 0;
+    // 这里不知道为什么一执行前面的就解析不了
+    for (int i = 0; i < ping.num_size(); i++)
+    {
+        sum += ping.num(i);
     }
+    pong.set_sum(sum);
+    cout << "Pong Msg :" << pong.DebugString() << endl;
+
+    int ssize = pong.ByteSizeLong() + 1;
+    cout << "Pong Size = " << ssize << endl;
+    char *sbuffer[ssize];
+    google::protobuf::io::ArrayOutputStream aos(sbuffer, ssize);
+    google::protobuf::io::CodedOutputStream *co = new google::protobuf::io::CodedOutputStream(&aos);
+    co->WriteVarint32(pong.ByteSizeLong());
+    pong.SerializeToCodedStream(co);
+    cout << "Pong Size = " << ssize << endl;
+    evbuffer_add(output, sbuffer, ssize);
+    cout << "Sended" << endl;
+
 }
 
 void
@@ -145,41 +174,22 @@ run(void)
     event_base_dispatch(base);
 }
 
-// protobuf foo
-int serialize_foo() {
-    ping::Ping ping;
-    ping.set_id(1);
-    ping.set_name("first");
-    ping.set_num(1,1);
-    ping.add_num(2);
-    ping.add_num(3);
 
-    fstream output("file", ios::out | ios::trunc | ios::binary);
-    if(!ping.SerializeToOstream(&output)) {
-        cout << "SerializeToOstream Failed" << endl;
-    }
-    cout << "ByteSizeLong:" <<  ping.ByteSizeLong() << endl;
-
-}
-
-int deserialize_foo() {
+void deserialize_foo() {
     fstream input("file", ios::in | ios::binary);
     ping::Ping ping;
     if(!ping.ParseFromIstream(&input)){
         cout << "ParseFromIstream Failed" << endl;
     }
     cout << ping.id() << ping.name() << ping.num_size() << endl;
-
 }
 
 int
 main(int c, char **v)
 {
-    // setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stdout, NULL, _IONBF, 0);
 
-    // run();
-    // return 0;
+    run();
+    return 0;
 
-    serialize_foo();
-    deserialize_foo();
 }
