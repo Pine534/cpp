@@ -1,12 +1,13 @@
 cmake_minimum_required(VERSION 3.10)
 project(server)
 # 调试必用参数，相当于gcc -g， 不然gdb找不到源文件，也不会报错
-set(CMAKE_CXX_FLAGS "-g") 
+# set(CMAKE_CXX_FLAGS "-g") 
 set(CMAKE_CXX_STANDARD 20)
 set(RELATIVE_EXTLIB "~/extlib")
 get_filename_component(EXTLIB ${RELATIVE_EXTLIB} ABSOLUTE)
 
 find_package(Protobuf REQUIRED) 
+find_package(gRPC CONFIG REQUIRED)
 set(PROTO_FILES proto/ping.proto)
 set(PROTO_SRCS )
 PROTOBUF_GENERATE_CPP(PROTO_SRCS PROTO_HDRS ${PROTO_FILES})
@@ -28,4 +29,5 @@ target_include_directories(server PUBLIC
 target_link_libraries(server
 	${LIBEVENT}
     ${Protobuf_LIBRARIES}
+    # gRPC::grpc++
 )
