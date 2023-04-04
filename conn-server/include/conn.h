@@ -38,7 +38,6 @@ class TClient:public std::enable_shared_from_this<TClient>{
     public:
     TClient(asio::ip::tcp::socket&& _Socket);
     ~TClient(){
-        Socket.cancel();
         cout<< "TClient Destroyed" << endl;
     }
 

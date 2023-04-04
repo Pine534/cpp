@@ -60,18 +60,23 @@ void TClient::Start() {
 }
 
 void TClient::StartTimer() {
+    if(State == ClientST::CLOSED) 
+        return;
+    TimerPtr->expires_from_now(boost::posix_time::milliseconds(1000));
     TimerPtr->async_wait([self = shared_from_this()](const boost::system::error_code& ec){
         if(ec) {
             cout << "async_wait Failed:" << ec.message() << endl;
         }else {
             self->ZipCachePto();
             self->CheckAlive();
-            // self->StartTimer();
+            self->StartTimer();
         }
     });
 }
 
 void TClient::StartRead() {
+    if(State == ClientST::CLOSED) 
+        return;
     Socket.async_receive(asio::buffer(RecvBufTail, RecvBufEnd - RecvBufTail), [self = shared_from_this()](const boost::system::error_code& error, std::size_t recv_size){
         if(self->GetState() == ClientST::CLOSED) {
             cout << "OnReceive: Client has closed" << endl; 
@@ -175,6 +180,8 @@ void TClient::ZipCachePto() {
 }
 
 void TClient::FlushZipData() {
+    if(State == ClientST::CLOSED) 
+        return;
     if(StreamBuffer.size() <= 0) {
         std::cout << "Nothing to Flush" << std::endl;
         return;
@@ -197,13 +204,14 @@ void TClient::CheckAlive() {
     if(Now - ActiveTime >= TimeOut) {
         
         CloseVfd(Vfd);
-        cout << "OnTimeout: " << shared_from_this().use_count() << endl; 
+        cout << "OnTimeout: " << shared_from_this().use_count() << endl;
     }
 }
 void TClient::Close() {
     if(State == ClientST::CLOSED) return;
     ZipCachePto();
     State = ClientST::CLOSED;
+    Socket.cancel();
 }
 
 void StartAccept(){
