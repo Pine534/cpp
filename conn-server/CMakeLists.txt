@@ -4,6 +4,7 @@ project(conn)
 set(CMAKE_CXX_FLAGS "-g") 
 set(CMAKE_CXX_STANDARD 17)
 set(RELATIVE_EXTLIB "~/extlib")
+set(CXXFLAGS "-Wall -Werror")
 get_filename_component(EXTLIB ${RELATIVE_EXTLIB} ABSOLUTE)
 
 add_executable(conn main.cpp src/conn.cpp)

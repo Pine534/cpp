@@ -64,8 +64,9 @@ void TClient::StartTimer() {
         if(ec) {
             cout << "async_wait Failed:" << ec.message() << endl;
         }else {
-            self -> ZipCachePto();
-            self -> CheckAlive();
+            self->ZipCachePto();
+            self->CheckAlive();
+            // self->StartTimer();
         }
     });
 }
@@ -76,6 +77,7 @@ void TClient::StartRead() {
             cout << "OnReceive: Client has closed" << endl; 
             return;
         }
+        cout << "Client Read" << endl;
         self->RecvBufTail += recv_size;
         self->ActiveTime = std::chrono::system_clock::now();
         self->SetReady(true);
@@ -86,37 +88,39 @@ void TClient::StartRead() {
 
 void TClient::ProcessPto() {
     uint8_t Header = 0;
-    int PtoLen = 0;
     memcpy(&Header, RecvBufHead, 1);
     int UsedLen = 0;
-    cout << ((Header >> 6) & 0x03) << endl;
+    int HeaderLen = 0;
+    int PtoLen = 0;
     if((Header >> 6) & 0x03) { // 11000000  判断前2位是否为1
-        int HeaderLen = (Header >> 6) & 0x03;
+        HeaderLen = (Header >> 6) & 0x03;
         memcpy(&PtoLen, RecvBufHead + 1, HeaderLen);
-        cout << HeaderLen << " " << PtoLen << endl;
         UsedLen = 1 + HeaderLen + PtoLen;
     } else {
         PtoLen = Header & 0x3f; //00111111  判断后6位是否为1
         UsedLen = 1 + PtoLen;
     }
+    cout << "ProcessPto Len:" << UsedLen << " " << 1 << " " << HeaderLen << " " << PtoLen << endl;
     if(RecvBufTail - RecvBufHead < UsedLen) {
         cout << "ProcessPto not enough data:" << RecvBufTail - RecvBufHead << " " << UsedLen << endl;
         return;
     }
+    
+
+    auto PtoData = std::shared_ptr<byte>(new byte[UsedLen],[](byte* p) {cout << "Try delete p" <<endl;delete[] p;});
+    memcpy(PtoData.get(), RecvBufHead + UsedLen - PtoLen, PtoLen);
+    
     RecvBufHead += UsedLen;
 
-    auto PtoData = std::make_shared<byte>(new byte[PtoLen],[](unsigned char* p) {delete[] p;});
-    memcpy(&PtoData, RecvBufHead + UsedLen - PtoLen, PtoLen);
 
     //TODO 暂时把拆出来的包重新发给下个Vfd或者自己
-    RunInMainThread([PtoLen, Vfd = this->Vfd, PtoData]() {
-        std::cout << "ProcessPto:" << PtoLen << " " << Vfd << std::endl;
+    RunInMainThread([UsedLen, Vfd = this->Vfd, PtoData]() {
         int TarVfd = Vfd;
         if(AllClients.find(Vfd + 1) != AllClients.end()) {
             TarVfd = Vfd + 1;
         }
         auto TarClient = AllClients[TarVfd];
-        TarClient->CachePto(PtoData.get(), PtoLen);
+        TarClient->CachePto(PtoData.get(), UsedLen);
 
     });
 
@@ -124,22 +128,43 @@ void TClient::ProcessPto() {
 
 //TODO 装包
 void TClient::CachePto(const byte* ptodata, size_t Len) {
-    if(SendBufEnd - SendBufTail < Len) {
+    uint8_t Header = 0;
+    int ExtLen = 0;
+    if(Len > 0x3f) {
+        int tmplen = Len;
+        while(tmplen >= 8) {
+            ExtLen++;
+        }
+        Header |= (ExtLen << 6);
+    } else {
+        Header |= Len;
+    }
+    int TotalLen = Len + ExtLen + 1;
+    cout << "CachePto Len:" << TotalLen << " " << 1 << " " << ExtLen << " " << Len << endl;
+    if(SendBufTail + TotalLen > SendBufEnd) {
         ZipCachePto();
     }
-    if(SendBufEnd - SendBufTail < Len) {
-        cout << "CachePto fail" << endl;
+    if(SendBufTail + TotalLen > SendBufEnd) {
+        cout << "Ptodata too long: " << TotalLen << endl;
         return;
     }
-    
 
-    memcpy(&SendBufTail, ptodata, Len);
+    memcpy(SendBufTail, &Header, 1);
+    SendBufTail += 1;
+    if(ExtLen > 0) {
+        memcpy(SendBufTail, &Len, ExtLen);
+        SendBufTail += ExtLen;
+    }
+    memcpy(SendBufTail, ptodata, Len);
     SendBufTail += Len;
+
+    ZipCachePto();
 }
 
 //TODO:tmp do nothing
 void TClient::ZipCachePto() {
     if(SendBufTail == SendBuffer) {
+        cout << "ZipCachePto Skip" << endl;
         return;
     }
     //直接用一次拷贝模拟压缩
@@ -150,16 +175,17 @@ void TClient::ZipCachePto() {
 }
 
 void TClient::FlushZipData() {
-    if(SendBuffer == SendBufTail) {
+    if(StreamBuffer.size() <= 0) {
         std::cout << "Nothing to Flush" << std::endl;
         return;
     }
-    async_write(Socket, asio::buffer(SendBuffer, SendBufTail - SendBuffer), [](const system::error_code& ec,size_t Len){
+    
+    async_write(Socket, StreamBuffer, [](const system::error_code& ec,size_t Len){
         if(ec) {
             cout << "async_send fail: " << ec.message() << endl;
         }
         else {
-            cout << "async_send succeed" << endl;
+            cout << "async_send succeed:" << Len << endl;
         }
 
     });
